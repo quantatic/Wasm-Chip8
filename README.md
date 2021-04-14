@@ -1,4 +1,4 @@
-# Chip-8 Emulator in Rust -> Webassembly
+# Chip-8 Emulator in Rust & Webassembly
 
 ## Build Instructions
 
