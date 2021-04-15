@@ -1,0 +1,26 @@
+{
+  "name": "wasm-chip8",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "build": "webpack build",
+    "start": "webpack serve"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quixotrykd/Wasm-Chip8.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/quixotrykd/Wasm-Chip8/issues"
+  },
+  "homepage": "https://github.com/quixotrykd/Wasm-Chip8#readme",
+  "devDependencies": {
+    "@wasm-tool/wasm-pack-plugin": "^1.4.0",
+    "html-webpack-plugin": "^5.3.1",
+    "webpack": "^5.33.2",
+    "webpack-cli": "^4.6.0",
+    "webpack-dev-server": "^3.11.2"
+  }
+}
