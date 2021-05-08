@@ -20,9 +20,9 @@ pub fn main() {
 #[wasm_bindgen]
 impl WasmChipEight {
     #[wasm_bindgen(constructor)]
-    pub fn new(program: &[u8]) -> Self {
+    pub fn new(program: &[u8], seed: u32) -> Self {
         Self {
-            chip_eight: ChipEight::new(program),
+            chip_eight: ChipEight::new(program, seed),
         }
     }
 
@@ -31,10 +31,22 @@ impl WasmChipEight {
     }
 
     pub fn step(&mut self) -> String {
-        let instruction = self.chip_eight.fetch_decode();
         let pc = self.chip_eight.pc();
+        let instruction = self.chip_eight.fetch_decode();
         self.chip_eight.execute(instruction);
-        format!("0x{:03x}: {:?}", pc, instruction)
+        format!("0x{:03x}: {:x?}", pc, instruction)
+    }
+
+    pub fn buffer_width() -> usize {
+        ChipEight::buffer_width()
+    }
+
+    pub fn buffer_height() -> usize {
+        ChipEight::buffer_height()
+    }
+
+    pub fn get_buffer(&self, x: usize, y: usize) -> bool {
+        self.chip_eight.get_buffer(x, y)
     }
 }
 

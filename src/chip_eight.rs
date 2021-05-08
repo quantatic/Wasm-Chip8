@@ -69,7 +69,6 @@ pub enum Instruction {
 pub struct ChipEight {
     memory: Vec<u8>,
     v: Vec<u8>,
-    vf: bool,
     i: u16,
     pc: u16,
     sp: u8,
@@ -77,10 +76,11 @@ pub struct ChipEight {
     st: u8,
     stack: Vec<u16>,
     display_buffer: Box<[[bool; DISPLAY_HEIGHT]; DISPLAY_WIDTH]>,
+    rng_state: u32,
 }
 
 impl ChipEight {
-    pub fn new(program: &[u8]) -> Self {
+    pub fn new(program: &[u8], seed: u32) -> Self {
         let mut memory = vec![0; MEMORY_SIZE];
 
         for i in 0..BUILTIN_SPRITES.len() {
@@ -94,7 +94,6 @@ impl ChipEight {
         Self {
             memory,
             v: vec![0; NUM_V_REGISTERS],
-            vf: false,
             i: 0,
             pc: PROGRAM_OFFSET,
             sp: 0,
@@ -102,6 +101,7 @@ impl ChipEight {
             st: 0,
             stack: vec![0; STACK_SIZE],
             display_buffer: Box::new([[false; DISPLAY_HEIGHT]; DISPLAY_WIDTH]),
+            rng_state: seed,
         }
     }
 
@@ -114,7 +114,7 @@ impl ChipEight {
         self.pc
     }
 
-    pub fn fetch_decode(&self) -> Instruction {
+    pub fn fetch_decode(&mut self) -> Instruction {
         let byte_high = self.memory[usize::from(self.pc)];
         let byte_low = self.memory[usize::from(self.pc) + 1];
 
@@ -128,9 +128,10 @@ impl ChipEight {
         let nnn = ((u16::from(byte_high) & 0x0F) << 8) | u16::from(byte_low);
         let kk = byte_low;
 
-        match nibbles {
-            (0x0, 0x0, 0x0, 0x0) => Instruction::Cls,
+        let instruction = match nibbles {
+            (0x0, 0x0, 0xE, 0x0) => Instruction::Cls,
             (0x0, 0x0, 0xE, 0xE) => Instruction::Ret,
+            (0x0, _, _, _) => Instruction::Sys(nnn),
             (0x1, _, _, _) => Instruction::Jp(nnn),
             (0x2, _, _, _) => Instruction::Call(nnn),
             (0x3, x, _, _) => Instruction::SeVxByte(x, kk),
@@ -146,7 +147,8 @@ impl ChipEight {
             (0x8, x, y, 0x5) => Instruction::SubVxVy(x, y),
             (0x8, x, _, 0x6) => Instruction::ShrVx(x),
             (0x8, x, y, 0x7) => Instruction::SubnVxVy(x, y),
-            (0x8, x, y, 0xE) => Instruction::SneVxVy(x, y),
+            (0x8, x, _y, 0xE) => Instruction::ShlVx(x),
+            (0x9, x, y, 0x0) => Instruction::SneVxVy(x, y),
             (0xA, _, _, _) => Instruction::LdIAddr(nnn),
             (0xB, _, _, _) => Instruction::JpV0Addr(nnn),
             (0xC, x, _, _) => Instruction::RndVxByte(x, kk),
@@ -162,13 +164,17 @@ impl ChipEight {
             (0xF, x, 0x3, 0x3) => Instruction::LdBVx(x),
             (0xF, x, 0x5, 0x5) => Instruction::LdIVx(x),
             (0xF, x, 0x6, 0x5) => Instruction::LdVxI(x),
-            _ => unreachable!("Unrecognized instruction nibbles: {:?}", nibbles),
-        }
+            _ => unreachable!("Unrecognized instruction nibbles: {:x?}", nibbles),
+        };
+
+        self.pc += 2;
+
+        instruction
     }
 
     pub fn execute(&mut self, instruction: Instruction) {
         match instruction {
-            Instruction::Cls => unimplemented!("Don't know how to clear display"),
+            Instruction::Cls => self.cls(),
             Instruction::Ret => self.ret(),
             Instruction::Sys(_) => unreachable!("Sys should never be called"),
             Instruction::Jp(addr) => self.jp(addr),
@@ -204,7 +210,6 @@ impl ChipEight {
             Instruction::LdIVx(x) => self.ld_i_vx(x),
             Instruction::LdVxI(x) => self.ld_vx_i(x),
         }
-        self.pc += 2;
     }
 
     fn get_reg(&self, reg: u8) -> u8 {
@@ -215,7 +220,23 @@ impl ChipEight {
         self.v[usize::from(reg)] = val;
     }
 
-    fn get_buffer(&self, x: usize, y: usize) -> bool {
+    fn get_vf(&self) -> u8 {
+        self.get_reg(0xF)
+    }
+
+    fn set_vf(&mut self, val: bool) {
+        self.set_reg(0xF, val as u8)
+    }
+
+    pub fn buffer_width() -> usize {
+        DISPLAY_WIDTH
+    }
+
+    pub fn buffer_height() -> usize {
+        DISPLAY_HEIGHT
+    }
+
+    pub fn get_buffer(&self, x: usize, y: usize) -> bool {
         self.display_buffer[usize::from(x)][usize::from(y)]
     }
 
@@ -269,7 +290,7 @@ impl ChipEight {
     }
 
     fn add_vx_byte(&mut self, x: u8, byte: u8) {
-        let new_val = self.get_reg(x) + byte;
+        let new_val = self.get_reg(x).wrapping_add(byte);
         self.set_reg(x, new_val);
     }
 
@@ -295,14 +316,14 @@ impl ChipEight {
 
     fn add_vx_vy(&mut self, x: u8, y: u8) {
         let (new_val, carry) = self.get_reg(x).overflowing_add(self.get_reg(y));
-        self.vf = carry;
+        self.set_vf(carry);
 
         self.set_reg(x, new_val);
     }
 
     fn sub_vx_vy(&mut self, x: u8, y: u8) {
         let (new_val, carry) = self.get_reg(x).overflowing_sub(self.get_reg(y));
-        self.vf = !carry;
+        self.set_vf(!carry);
 
         self.set_reg(x, new_val);
     }
@@ -310,14 +331,14 @@ impl ChipEight {
     fn shr_vx(&mut self, x: u8) {
         let old_val = self.get_reg(x);
         let new_val = old_val >> 1;
-        self.vf = (old_val & 0x01) != 0;
+        self.set_vf((old_val & 0x01) != 0);
 
         self.set_reg(x, new_val);
     }
 
     fn subn_vx_vy(&mut self, x: u8, y: u8) {
         let (new_val, carry) = self.get_reg(y).overflowing_sub(self.get_reg(x));
-        self.vf = !carry;
+        self.set_vf(!carry);
 
         self.set_reg(x, new_val);
     }
@@ -325,7 +346,7 @@ impl ChipEight {
     fn shl_vx(&mut self, x: u8) {
         let old_val = self.get_reg(x);
         let new_val = old_val << 1;
-        self.vf = (old_val & 0x80) != 0;
+        self.set_vf((old_val & 0x80) != 0);
 
         self.set_reg(x, new_val);
     }
@@ -344,36 +365,46 @@ impl ChipEight {
         self.pc = u16::from(self.get_reg(0)) + addr;
     }
 
+    // https://en.wikipedia.org/wiki/Linear_congruential_generator
+    //
+    // Use glibc values:
+    // m: 2^31
+    // a: 1103515245
+    // c: 12345
+    // We get the middle 8 bits here because the last 8 bits seem to alternate
+    //   between even and odd, and we don't want that.
     fn rnd_vx_byte(&mut self, x: u8, byte: u8) {
-        // 0x69 was chosen by a fair coin flip
-        let new_val = 0x69 & byte;
+        self.rng_state =
+            self.rng_state.wrapping_mul(1103515245).wrapping_add(12345) % u32::pow(2, 31);
+
+        let rand_byte = (self.rng_state >> 8) as u8;
+        let new_val = rand_byte & byte;
 
         self.set_reg(x, new_val);
     }
 
     fn drw_vx_vy_nibble(&mut self, x: u8, y: u8, nibble: u8) {
         let mut collision = false;
-        let x_coord = self.get_reg(x);
-        let y_coord = self.get_reg(y);
-        for i in 0..nibble {
-            let byte = self.memory[usize::from(self.i) + usize::from(i)];
+        let base_x_coord = self.get_reg(x);
+        let base_y_coord = self.get_reg(y);
+        for dy in 0..nibble {
+            let byte = self.memory[usize::from(self.i) + usize::from(dy)];
             for dx in 0..8 {
-                let flip = byte & (1 << dx) != 0;
+                let x = usize::from(base_x_coord + dx) % DISPLAY_WIDTH;
+                let y = usize::from(base_y_coord + dy) % DISPLAY_HEIGHT;
+                let flip = byte & (1 << (7 - dx)) != 0;
                 if flip {
-                    let flipped_pixel =
-                        !self.get_buffer(usize::from(x_coord) + dx, usize::from(y_coord));
+                    let flipped_pixel = !self.get_buffer(x, y);
 
-                    // Collision is set to true if flipped pixel is now off.
+                    // Collision is set to true iff flipped pixel is now off.
                     collision |= !flipped_pixel;
 
-                    self.set_buffer(
-                        usize::from(x_coord) + dx,
-                        usize::from(y_coord),
-                        flipped_pixel,
-                    );
+                    self.set_buffer(x, y, flipped_pixel);
                 }
             }
         }
+
+        self.set_vf(collision);
     }
 
     fn skp_vx(&mut self, _x: u8) {
@@ -404,14 +435,18 @@ impl ChipEight {
         self.i += u16::from(self.get_reg(x));
     }
 
-    fn ld_f_vx(&mut self, _x: u8) {
-        unimplemented!()
+    fn ld_f_vx(&mut self, x: u8) {
+        let digit_wanted = self.get_reg(x);
+        assert!(x <= 0xF);
+        self.i = u16::from(digit_wanted) * 5;
     }
 
     fn ld_b_vx(&mut self, x: u8) {
-        let hundreds = x / 100;
-        let tens = (x % 100) / 10;
-        let ones = x % 10;
+        let value = self.get_reg(x);
+
+        let hundreds = value / 100;
+        let tens = (value % 100) / 10;
+        let ones = value % 10;
 
         self.memory[usize::from(self.i)] = hundreds;
         self.memory[usize::from(self.i) + 1] = tens;

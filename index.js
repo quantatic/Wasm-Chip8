@@ -1,20 +1,40 @@
+const PIXEL_SIZE = 16;
+
 async function main() {
 	const wasm = await import("./pkg");
 	const bg = await import("./pkg/index_bg.wasm");
 
+	const bufferWidth = wasm.WasmChipEight.buffer_width();
+	const bufferHeight = wasm.WasmChipEight.buffer_height();
+
+	const canvas = document.getElementById("chip-8-canvas");
+	canvas.width = bufferWidth * PIXEL_SIZE;
+	canvas.height = bufferHeight * PIXEL_SIZE;
+
+	const ctx = canvas.getContext("2d");
+
+	const textBox = document.getElementById("chip-8-steps");
+
 	const program = wasm.WasmChipEight.get_example_program();
-	console.log(program);
-	const chipEight = new wasm.WasmChipEight(program);
-	for(;;) {
-		console.log(chipEight.step());
-	}
 
-	const a = 4;
-	const b = 5;
+	const randomSeed = Math.floor(Math.random() * (Math.pow(2, 32) - 1));
+	const chipEight = new wasm.WasmChipEight(program, randomSeed);
 
-	const result = wasm.add(a, b);
+	setInterval(() => {
+		const stepResult = chipEight.step();
+		textBox.value += stepResult + "\n";
+		for(var y = 0; y < bufferHeight; y++) {
+			for(var x = 0; x < bufferWidth; x++) {
+				if(chipEight.get_buffer(x, y)) {
+					ctx.fillStyle = "black";
+				} else {
+					ctx.fillStyle = "white";
+				}
 
-	console.log(`${a} + ${b} = ${result}`);
+				ctx.fillRect(x * PIXEL_SIZE, y * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
+			}
+		}
+	}, 1);
 };
 
 main()
