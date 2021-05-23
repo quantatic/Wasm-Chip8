@@ -23,15 +23,17 @@ async function main() {
 	setInterval(() => {
 		const stepResult = chipEight.step();
 		textBox.value += stepResult + "\n";
+
+		// First clear full display, then manually draw in black squares.
+		ctx.fillStyle = "white";
+		ctx.fillRect(0, 0, bufferWidth * PIXEL_SIZE, bufferHeight * PIXEL_SIZE);
+
+		ctx.fillStyle = "black";
 		for(var y = 0; y < bufferHeight; y++) {
 			for(var x = 0; x < bufferWidth; x++) {
 				if(chipEight.get_buffer(x, y)) {
-					ctx.fillStyle = "black";
-				} else {
-					ctx.fillStyle = "white";
+					ctx.fillRect(x * PIXEL_SIZE, y * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
 				}
-
-				ctx.fillRect(x * PIXEL_SIZE, y * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
 			}
 		}
 	}, 1);
